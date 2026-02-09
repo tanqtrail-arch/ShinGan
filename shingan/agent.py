@@ -3,10 +3,12 @@ ShinGan Agent - Nano Banana Pro (Gemini 3 Pro Image) 画像生成エージェン
 
 対話型のイメージ生成エージェント。テキストプロンプトからの生成、
 画像編集、マルチターン会話によるイテレーティブな改善をサポート。
+セッション管理・指数バックオフリトライ付き。
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -20,7 +22,9 @@ from shingan.prompts.catalog import (
     Prompt,
     get_prompt_by_id,
 )
+from shingan.session import RetryConfig, SessionError, SessionManager, SessionState
 
+logger = logging.getLogger(__name__)
 
 # モデル定数
 MODEL_PRO = "gemini-3-pro-image-preview"
@@ -38,6 +42,8 @@ class GenerationResult:
     elapsed_sec: float = 0.0
     model: str = ""
     prompt_used: str = ""
+    session_id: str | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -50,6 +56,8 @@ class AgentConfig:
     default_aspect_ratio: str = "1:1"
     use_thinking: bool = True
     use_search_grounding: bool = False
+    max_retries: int = 4
+    retry_base_delay: float = 2.0
 
 
 class ShinGanAgent:
@@ -65,7 +73,7 @@ class ShinGanAgent:
         else:
             self.client = genai.Client()
 
-        self._chat: genai.chats.Chat | None = None
+        self._session_mgr: SessionManager | None = None
         self._history: list[dict] = []
 
     def _build_config(
@@ -190,27 +198,54 @@ class ShinGanAgent:
 
         return result
 
-    def start_chat(self) -> None:
-        """マルチターンチャットセッションを開始する。"""
-        config = self._build_config()
-        self._chat = self.client.chats.create(
-            model=self.config.model,
-            config=config,
+    def start_chat(self) -> str:
+        """マルチターンチャットセッションを開始する。セッションIDを返す。"""
+        gen_config = self._build_config()
+        retry_cfg = RetryConfig(
+            max_retries=self.config.max_retries,
+            base_delay_sec=self.config.retry_base_delay,
         )
+        self._session_mgr = SessionManager(
+            client=self.client,
+            model=self.config.model,
+            config=gen_config,
+            retry_config=retry_cfg,
+        )
+        session_info = self._session_mgr.create_session()
+        logger.info(f"チャットセッション開始: {session_info.session_id}")
+        return session_info.session_id
+
+    @property
+    def session_state(self) -> str | None:
+        """現在のセッション状態を返す。"""
+        if self._session_mgr is None:
+            return None
+        return self._session_mgr.session.state.value
 
     def chat(self, message: str, save_prefix: str = "chat") -> GenerationResult:
         """チャットセッションでメッセージを送信し、画像を生成/編集する。"""
-        if self._chat is None:
+        if self._session_mgr is None or not self._session_mgr.is_active:
             self.start_chat()
 
         start = time.monotonic()
-        response = self._chat.send_message(message)
+        try:
+            response = self._session_mgr.send_message(message)
+        except SessionError as e:
+            logger.error(f"チャットエラー: {e}")
+            return GenerationResult(
+                elapsed_sec=time.monotonic() - start,
+                model=self.config.model,
+                prompt_used=message,
+                session_id=self._session_mgr.session.session_id,
+                error=str(e),
+            )
         elapsed = time.monotonic() - start
 
         result = GenerationResult(
             elapsed_sec=elapsed,
             model=self.config.model,
             prompt_used=message,
+            session_id=self._session_mgr.session.session_id,
         )
 
         for part in response.parts:
@@ -219,7 +254,26 @@ class ShinGanAgent:
             elif part.inline_data is not None:
                 result.image_path = self._save_image(part, prefix=save_prefix)
 
+        self._history.append({
+            "role": "user",
+            "prompt": message,
+            "result": result,
+        })
+
         return result
+
+    def reset_chat(self) -> str:
+        """チャットセッションをリセットする。新しいセッションIDを返す。"""
+        if self._session_mgr:
+            session_info = self._session_mgr.reset()
+            return session_info.session_id
+        return self.start_chat()
+
+    def close_chat(self) -> None:
+        """チャットセッションを閉じる。"""
+        if self._session_mgr:
+            self._session_mgr.close()
+            self._session_mgr = None
 
     def edit_image(
         self,

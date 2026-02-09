@@ -246,5 +246,26 @@ def edit_image(ctx, image_path: str, edit_prompt: str, aspect_ratio: str | None,
     console.print(f"[dim]所要時間: {result.elapsed_sec:.1f}秒[/dim]")
 
 
+@main.command("serve")
+@click.option("--host", default="0.0.0.0", help="ホスト")
+@click.option("--port", "-p", default=8080, type=int, help="ポート")
+@click.option("--reload", is_flag=True, help="自動リロード（開発用）")
+@click.pass_context
+def serve(ctx, host: str, port: int, reload: bool):
+    """Web APIサーバーを起動する。"""
+    import uvicorn
+
+    console.print(f"[bold]ShinGan API Server[/bold]")
+    console.print(f"  http://{host}:{port}")
+    console.print(f"  Docs: http://{host}:{port}/docs")
+
+    uvicorn.run(
+        "shingan.server:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
+
+
 if __name__ == "__main__":
     main()
