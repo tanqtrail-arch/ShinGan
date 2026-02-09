@@ -2,11 +2,14 @@
 ShinGan CLI - コマンドラインインターフェース
 
 使い方:
-  shingan list                  # プロンプト一覧
-  shingan generate <prompt_id>  # カタログから生成
-  shingan gen "自由なプロンプト" # フリープロンプトで生成
-  shingan chat                  # 対話モード
-  shingan edit <image> "指示"   # 画像編集
+  shingan list                       # プロンプト一覧
+  shingan show <id>                  # プロンプト詳細
+  shingan generate <prompt_id>       # カタログから生成
+  shingan gen "プロンプト"            # フリー生成
+  shingan batch --category character # カテゴリ一括
+  shingan build                      # 対話型ビルダー
+  shingan chat                       # 対話モード
+  shingan serve                      # Web API サーバー
 """
 
 from __future__ import annotations
@@ -15,9 +18,19 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.table import Table
 
 from shingan.agent import AgentConfig, ShinGanAgent, MODEL_PRO, MODEL_FLASH
+from shingan.builder import (
+    ASPECT_RATIOS,
+    COMPOSITIONS,
+    LIGHTINGS,
+    RESOLUTIONS,
+    STYLES,
+    PromptDraft,
+)
 from shingan.prompts.catalog import (
     CATEGORY_LABELS,
     PROMPT_CATALOG,
@@ -47,37 +60,35 @@ def main(ctx, model: str, output_dir: str):
     )
 
 
+# =========================================================================
+# カタログ
+# =========================================================================
+
 @main.command("list")
 @click.option("--category", "-c", default=None, help="カテゴリでフィルタ")
 def list_prompts(category: str | None):
     """プロンプトカタログ一覧を表示する。"""
-    table = Table(title="ShinGan プロンプトカタログ (Nano Banana Pro)")
+    table = Table(title="ShinGan プロンプトカタログ")
     table.add_column("ID", style="cyan", no_wrap=True)
     table.add_column("カテゴリ", style="magenta")
     table.add_column("名前", style="green")
     table.add_column("解像度", justify="center")
     table.add_column("比率", justify="center")
-    table.add_column("Thinking", justify="center")
-    table.add_column("Search", justify="center")
+    table.add_column("TH", justify="center")
+    table.add_column("SR", justify="center")
 
     prompts = PROMPT_CATALOG
     if category:
         prompts = get_prompts_by_category(category)
         if not prompts:
             console.print(f"[red]カテゴリ '{category}' が見つかりません[/red]")
-            console.print(f"利用可能: {', '.join(list_categories())}")
             return
 
     for p in prompts:
-        cat_label = CATEGORY_LABELS.get(p.category, p.category)
         table.add_row(
-            p.id,
-            cat_label,
-            p.name_ja,
-            p.resolution,
-            p.aspect_ratio,
-            "✓" if p.use_thinking else "",
-            "✓" if p.use_search_grounding else "",
+            p.id, CATEGORY_LABELS.get(p.category, p.category),
+            p.name_ja, p.resolution, p.aspect_ratio,
+            "o" if p.use_thinking else "", "o" if p.use_search_grounding else "",
         )
 
     console.print(table)
@@ -104,154 +115,209 @@ def show_prompt(prompt_id: str):
     console.print(f"ID: [cyan]{p.id}[/cyan]")
     console.print(f"カテゴリ: [magenta]{CATEGORY_LABELS.get(p.category, p.category)}[/magenta]")
     console.print(f"解像度: {p.resolution} / 比率: {p.aspect_ratio}")
-    console.print(f"Thinking: {'有効' if p.use_thinking else '無効'}")
-    console.print(f"Search Grounding: {'有効' if p.use_search_grounding else '無効'}")
-    console.print(f"\n[bold]プロンプト:[/bold]")
-    console.print(f"[green]{p.prompt}[/green]")
+    console.print(f"\n[bold]プロンプト:[/bold]\n[green]{p.prompt}[/green]")
     console.print(f"\n[dim]{p.description_ja}[/dim]")
 
+
+# =========================================================================
+# 生成
+# =========================================================================
 
 @main.command("generate")
 @click.argument("prompt_id")
 @click.pass_context
 def generate_from_catalog(ctx, prompt_id: str):
-    """カタログのプロンプトから画像を生成する。"""
+    """カタログのプロンプトから生成リクエストを作成する。"""
     config = ctx.obj["config"]
     agent = ShinGanAgent(config)
-
     p = get_prompt_by_id(prompt_id)
     if p is None:
         console.print(f"[red]プロンプト '{prompt_id}' が見つかりません[/red]")
         return
 
-    console.print(f"[bold]生成中...[/bold] {p.name_ja}")
-    console.print(f"  モデル: {config.model}")
-    console.print(f"  解像度: {p.resolution} / 比率: {p.aspect_ratio}")
-
-    with console.status("Nano Banana Pro で生成中..."):
-        result = agent.generate_from_catalog(prompt_id)
-
-    if result.image_path:
-        console.print(f"[green]✓ 画像保存: {result.image_path}[/green]")
-    if result.text:
-        console.print(f"[dim]モデル応答: {result.text}[/dim]")
-    console.print(f"[dim]所要時間: {result.elapsed_sec:.1f}秒[/dim]")
+    result = agent.generate_from_catalog(prompt_id)
+    console.print(f"[green]準備完了[/green] {p.name_ja}")
+    console.print(f"  ID: {result.id}")
+    console.print(f"  ステータス: {result.status}")
+    console.print(f"  メタデータ: output/{result.id}_meta.json")
 
 
 @main.command("gen")
 @click.argument("prompt")
-@click.option("--aspect-ratio", "-a", default="1:1", help="アスペクト比")
-@click.option("--resolution", "-r", default="2K", help="解像度 (1K/2K/4K)")
-@click.option("--thinking/--no-thinking", default=True, help="Thinkingモード")
-@click.option("--search/--no-search", default=False, help="Search Grounding")
+@click.option("--aspect-ratio", "-a", default="1:1")
+@click.option("--resolution", "-r", default="2K")
 @click.pass_context
-def generate_free(ctx, prompt: str, aspect_ratio: str, resolution: str, thinking: bool, search: bool):
-    """フリープロンプトで画像を生成する。"""
+def generate_free(ctx, prompt: str, aspect_ratio: str, resolution: str):
+    """フリープロンプトで生成リクエストを作成する。"""
     config = ctx.obj["config"]
     agent = ShinGanAgent(config)
 
-    console.print(f"[bold]生成中...[/bold]")
-    console.print(f"  プロンプト: {prompt[:80]}...")
-    console.print(f"  モデル: {config.model} / 解像度: {resolution} / 比率: {aspect_ratio}")
+    result = agent.generate(prompt, aspect_ratio=aspect_ratio, resolution=resolution)
+    console.print(f"[green]準備完了[/green]")
+    console.print(f"  ID: {result.id}")
+    console.print(f"  プロンプト: {prompt[:60]}...")
+    console.print(f"  メタデータ: output/{result.id}_meta.json")
 
-    with console.status("Nano Banana Pro で生成中..."):
+
+# =========================================================================
+# バッチ
+# =========================================================================
+
+@main.command("batch")
+@click.option("--category", "-c", required=True, help="カテゴリ")
+@click.option("--count", "-n", default=None, type=int, help="件数上限")
+@click.pass_context
+def batch_generate(ctx, category: str, count: int | None):
+    """カテゴリ全体を一括生成する。"""
+    config = ctx.obj["config"]
+    agent = ShinGanAgent(config)
+
+    try:
+        results = agent.batch_from_category(category, count=count)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        return
+
+    console.print(f"[green]バッチ準備完了[/green] {len(results)}件")
+    for r in results:
+        console.print(f"  {r.id} - {r.prompt_used[:50]}...")
+
+
+# =========================================================================
+# プロンプトビルダー
+# =========================================================================
+
+def _pick(label: str, options: dict[str, str]) -> str:
+    """選択肢から選ばせる。空Enterでスキップ。"""
+    console.print(f"\n[bold]{label}[/bold]")
+    keys = list(options.keys())
+    for i, (k, v) in enumerate(options.items()):
+        console.print(f"  [cyan]{i+1}[/cyan]. {k} - {v}")
+    console.print(f"  [dim]Enter でスキップ / 番号 or キーワード入力[/dim]")
+
+    choice = Prompt.ask("選択", default="")
+    if not choice:
+        return ""
+    if choice.isdigit():
+        idx = int(choice) - 1
+        if 0 <= idx < len(keys):
+            return options[keys[idx]]
+    if choice in options:
+        return options[choice]
+    return choice  # 自由入力
+
+
+@main.command("build")
+@click.pass_context
+def build_prompt(ctx):
+    """対話型プロンプトビルダー。"""
+    config = ctx.obj["config"]
+
+    console.print(Panel("[bold]ShinGan プロンプトビルダー[/bold]\n"
+                        "ステップごとにプロンプトを組み立てます。"))
+
+    draft = PromptDraft()
+
+    # 1. Subject
+    draft.subject = Prompt.ask("\n[bold]1. 被写体[/bold] (何を描く？)", default="")
+
+    # 2. Action
+    draft.action = Prompt.ask("[bold]2. アクション[/bold] (何をしている？)", default="")
+
+    # 3. Location
+    draft.location = Prompt.ask("[bold]3. 場所/文脈[/bold]", default="")
+
+    # 4. Style
+    draft.style = _pick("4. スタイル", STYLES)
+
+    # 5. Composition
+    draft.composition = _pick("5. 構図/カメラ", COMPOSITIONS)
+
+    # 6. Lighting
+    draft.lighting = _pick("6. ライティング", LIGHTINGS)
+
+    # 7. Constraint
+    draft.constraint = Prompt.ask("\n[bold]7. 追加指示[/bold] (テキスト描画、制約等)", default="")
+
+    # 8. Aspect Ratio
+    draft.aspect_ratio = _pick("8. アスペクト比", ASPECT_RATIOS) or "1:1"
+    # _pick returns the description, so re-map
+    for k, v in ASPECT_RATIOS.items():
+        if draft.aspect_ratio == v:
+            draft.aspect_ratio = k
+            break
+
+    # 9. Resolution
+    draft.resolution = _pick("9. 解像度", RESOLUTIONS) or "2K"
+    for k, v in RESOLUTIONS.items():
+        if draft.resolution == v:
+            draft.resolution = k
+            break
+
+    # Compile and show
+    compiled = draft.compile()
+    console.print(Panel(f"[green]{compiled}[/green]", title="生成プロンプト"))
+    console.print(f"比率: {draft.aspect_ratio} / 解像度: {draft.resolution}")
+
+    # Generate?
+    do_gen = Prompt.ask("\nこのプロンプトで生成リクエストを作成しますか？", choices=["y", "n"], default="y")
+    if do_gen == "y":
+        agent = ShinGanAgent(config)
         result = agent.generate(
-            prompt,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            use_thinking=thinking,
-            use_search_grounding=search,
+            compiled,
+            aspect_ratio=draft.aspect_ratio,
+            resolution=draft.resolution,
         )
+        console.print(f"\n[green]準備完了[/green] ID: {result.id}")
+        console.print(f"メタデータ: output/{result.id}_meta.json")
 
-    if result.image_path:
-        console.print(f"[green]✓ 画像保存: {result.image_path}[/green]")
-    if result.text:
-        console.print(f"[dim]モデル応答: {result.text}[/dim]")
-    console.print(f"[dim]所要時間: {result.elapsed_sec:.1f}秒[/dim]")
 
+# =========================================================================
+# チャット
+# =========================================================================
 
 @main.command("chat")
 @click.pass_context
 def chat_mode(ctx):
-    """対話型チャットモードで画像を生成・編集する。"""
+    """対話型チャットモード。"""
     config = ctx.obj["config"]
     agent = ShinGanAgent(config)
 
-    console.print("[bold]ShinGan チャットモード[/bold]")
-    console.print(f"モデル: {config.model}")
-    console.print("'quit' で終了 / 'history' で履歴表示\n")
+    console.print("[bold]ShinGan チャットモード[/bold] (stub)")
+    console.print("'quit' で終了 / 'history' で履歴\n")
 
     agent.start_chat()
 
     while True:
         try:
-            user_input = console.input("[bold cyan]あなた>[/bold cyan] ")
+            user_input = console.input("[bold cyan]> [/bold cyan]")
         except (EOFError, KeyboardInterrupt):
-            console.print("\n終了します。")
             break
 
-        if user_input.strip().lower() in ("quit", "exit", "q"):
-            console.print("終了します。")
+        cmd = user_input.strip().lower()
+        if cmd in ("quit", "exit", "q"):
             break
-
-        if user_input.strip().lower() == "history":
-            for i, h in enumerate(agent.history):
-                console.print(f"  [{i+1}] {h['prompt'][:60]}...")
+        if cmd == "history":
+            for r in agent.history:
+                console.print(f"  {r.id} - {r.prompt_used[:50]}...")
+            continue
+        if not cmd:
             continue
 
-        if not user_input.strip():
-            continue
-
-        with console.status("生成中..."):
-            result = agent.chat(user_input)
-
-        if result.image_path:
-            console.print(f"[green]✓ 画像保存: {result.image_path}[/green]")
-        if result.text:
-            console.print(f"[bold]ShinGan>[/bold] {result.text}")
-        console.print(f"[dim]({result.elapsed_sec:.1f}秒)[/dim]\n")
+        result = agent.chat(user_input)
+        console.print(f"  [{result.id}] {result.text}")
+        console.print()
 
 
-@main.command("edit")
-@click.argument("image_path")
-@click.argument("edit_prompt")
-@click.option("--aspect-ratio", "-a", default=None, help="アスペクト比")
-@click.option("--resolution", "-r", default=None, help="解像度")
-@click.pass_context
-def edit_image(ctx, image_path: str, edit_prompt: str, aspect_ratio: str | None, resolution: str | None):
-    """既存画像を編集する。"""
-    config = ctx.obj["config"]
-    agent = ShinGanAgent(config)
-
-    if not Path(image_path).exists():
-        console.print(f"[red]画像ファイルが見つかりません: {image_path}[/red]")
-        return
-
-    console.print(f"[bold]画像編集中...[/bold]")
-    console.print(f"  元画像: {image_path}")
-    console.print(f"  指示: {edit_prompt}")
-
-    with console.status("編集中..."):
-        result = agent.edit_image(
-            image_path,
-            edit_prompt,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-        )
-
-    if result.image_path:
-        console.print(f"[green]✓ 編集後画像: {result.image_path}[/green]")
-    if result.text:
-        console.print(f"[dim]モデル応答: {result.text}[/dim]")
-    console.print(f"[dim]所要時間: {result.elapsed_sec:.1f}秒[/dim]")
-
+# =========================================================================
+# サーバー
+# =========================================================================
 
 @main.command("serve")
-@click.option("--host", default="0.0.0.0", help="ホスト")
-@click.option("--port", "-p", default=8080, type=int, help="ポート")
+@click.option("--host", default="0.0.0.0")
+@click.option("--port", "-p", default=8080, type=int)
 @click.option("--reload", is_flag=True, help="自動リロード（開発用）")
-@click.pass_context
-def serve(ctx, host: str, port: int, reload: bool):
+def serve(host: str, port: int, reload: bool):
     """Web APIサーバーを起動する。"""
     import uvicorn
 
@@ -259,12 +325,7 @@ def serve(ctx, host: str, port: int, reload: bool):
     console.print(f"  http://{host}:{port}")
     console.print(f"  Docs: http://{host}:{port}/docs")
 
-    uvicorn.run(
-        "shingan.server:app",
-        host=host,
-        port=port,
-        reload=reload,
-    )
+    uvicorn.run("shingan.server:app", host=host, port=port, reload=reload)
 
 
 if __name__ == "__main__":

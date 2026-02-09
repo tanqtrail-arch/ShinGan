@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShinGan Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>ShinGan</h1>
+  <span class="subtitle">Nano Banana Pro Agent Dashboard</span>
+  <nav>
+    <button class="nav-btn active" data-tab="catalog">Catalog</button>
+    <button class="nav-btn" data-tab="builder">Builder</button>
+    <button class="nav-btn" data-tab="batch">Batch</button>
+    <button class="nav-btn" data-tab="references">References</button>
+    <button class="nav-btn" data-tab="history">History</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ====== Catalog Tab ====== -->
+  <section id="tab-catalog" class="tab active">
+    <div class="toolbar">
+      <select id="cat-filter"><option value="">All</option></select>
+      <span id="cat-count"></span>
+    </div>
+    <div id="prompt-grid" class="card-grid"></div>
+  </section>
+
+  <!-- ====== Builder Tab ====== -->
+  <section id="tab-builder" class="tab">
+    <div class="builder-form">
+      <div class="field">
+        <label>1. Subject</label>
+        <input id="b-subject" placeholder="A cute pixel art mascot">
+      </div>
+      <div class="field">
+        <label>2. Action</label>
+        <input id="b-action" placeholder="running through a forest">
+      </div>
+      <div class="field">
+        <label>3. Location</label>
+        <input id="b-location" placeholder="a magical enchanted forest">
+      </div>
+      <div class="field">
+        <label>4. Style</label>
+        <select id="b-style"><option value="">--</option></select>
+      </div>
+      <div class="field">
+        <label>5. Composition</label>
+        <select id="b-composition"><option value="">--</option></select>
+      </div>
+      <div class="field">
+        <label>6. Lighting</label>
+        <select id="b-lighting"><option value="">--</option></select>
+      </div>
+      <div class="field">
+        <label>7. Constraint</label>
+        <input id="b-constraint" placeholder="Text: 'HELLO' visible on sign">
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Aspect Ratio</label>
+          <select id="b-ar"><option value="">--</option></select>
+        </div>
+        <div class="field">
+          <label>Resolution</label>
+          <select id="b-res"><option value="">--</option></select>
+        </div>
+      </div>
+      <button id="btn-compile" class="btn-primary">Compile Prompt</button>
+      <div id="compiled-output" class="compiled-box hidden"></div>
+      <button id="btn-generate-built" class="btn-primary hidden">Generate Request</button>
+    </div>
+  </section>
+
+  <!-- ====== Batch Tab ====== -->
+  <section id="tab-batch" class="tab">
+    <div class="toolbar">
+      <select id="batch-cat"><option value="">Category...</option></select>
+      <input id="batch-count" type="number" placeholder="Count" min="1">
+      <button id="btn-batch" class="btn-primary">Batch Generate</button>
+    </div>
+    <div id="batch-results"></div>
+  </section>
+
+  <!-- ====== References Tab ====== -->
+  <section id="tab-references" class="tab">
+    <div class="toolbar">
+      <input id="ref-group" placeholder="Group name">
+      <input id="ref-path" placeholder="Image path">
+      <button id="btn-add-ref" class="btn-primary">Add</button>
+    </div>
+    <div id="ref-list"></div>
+  </section>
+
+  <!-- ====== History Tab ====== -->
+  <section id="tab-history" class="tab">
+    <div class="toolbar">
+      <button id="btn-refresh-history" class="btn-primary">Refresh</button>
+      <button id="btn-export-history">Export JSON</button>
+    </div>
+    <div id="history-list"></div>
+  </section>
+</main>
+
+<!-- Attach modal -->
+<div id="attach-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Attach Image</h3>
+    <p id="attach-id"></p>
+    <input type="file" id="attach-file" accept="image/*">
+    <div class="modal-actions">
+      <button id="btn-attach-submit" class="btn-primary">Upload</button>
+      <button id="btn-attach-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f13;--surface:#1a1a22;--surface2:#23232e;--border:#2d2d3a;--text:#e4e4ef;--dim:#8888a0;--accent:#ff6b4a;--accent2:#ff8f73;--green:#4ade80;--blue:#60a5fa;--tag:#2a2a3a}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:20px;color:var(--accent)}
+header .subtitle{color:var(--dim);font-size:13px}
+nav{margin-left:auto;display:flex;gap:4px}
+.nav-btn{background:transparent;border:1px solid var(--border);color:var(--dim);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;transition:.15s}
+.nav-btn:hover{border-color:var(--accent);color:var(--text)}
+.nav-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+main{padding:20px 24px;max-width:1200px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+select,input[type=number],input[type=text],input[type=file]{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:6px;font-size:13px}
+input::placeholder{color:var(--dim)}
+.btn-primary{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+.btn-primary:hover{background:var(--accent2)}
+button:not(.btn-primary):not(.nav-btn){background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+button:not(.btn-primary):not(.nav-btn):hover{border-color:var(--accent)}
+
+/* Card grid */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;transition:.15s}
+.card:hover{border-color:var(--accent)}
+.card h3{font-size:14px;color:var(--accent);margin-bottom:4px}
+.card .meta{color:var(--dim);font-size:12px;margin-bottom:8px}
+.card .prompt-text{font-size:12px;color:var(--dim);line-height:1.5;max-height:60px;overflow:hidden}
+.card .tags{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+.tag{background:var(--tag);padding:2px 8px;border-radius:4px;font-size:11px;color:var(--dim)}
+.card .actions{margin-top:10px;display:flex;gap:6px}
+
+/* Builder */
+.builder-form{max-width:600px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px;font-weight:600}
+.field input,.field select{width:100%}
+.row{display:flex;gap:12px}.row .field{flex:1}
+.compiled-box{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;font-size:13px;line-height:1.6;color:var(--green);white-space:pre-wrap}
+
+/* History */
+.history-item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:14px}
+.history-item .hi-id{font-family:monospace;color:var(--blue);font-size:12px;min-width:100px}
+.history-item .hi-prompt{flex:1;font-size:13px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history-item .hi-status{font-size:11px;padding:3px 10px;border-radius:4px}
+.status-pending{background:#3a3a20;color:#fbbf24}
+.status-completed{background:#1a3a20;color:var(--green)}
+.status-error{background:#3a1a1a;color:#f87171}
+
+/* Image placeholder */
+.img-placeholder{width:80px;height:80px;background:var(--surface2);border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dim);cursor:pointer}
+.img-placeholder:hover{border-color:var(--accent)}
+.img-placeholder img{width:100%;height:100%;object-fit:cover;border-radius:7px}
+
+/* Ref list */
+.ref-group{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px}
+.ref-group h4{font-size:13px;color:var(--blue);margin-bottom:6px}
+.ref-group .ref-paths{font-size:12px;color:var(--dim)}
+
+/* Modal */
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-content{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:360px}
+.modal-content h3{margin-bottom:12px;color:var(--accent)}
+.modal-actions{display:flex;gap:8px;margin-top:14px}
+.hidden{display:none!important}

@@ -1,28 +1,23 @@
 """
 ShinGan Agent - Nano Banana Pro (Gemini 3 Pro Image) 画像生成エージェント
 
-対話型のイメージ生成エージェント。テキストプロンプトからの生成、
-画像編集、マルチターン会話によるイテレーティブな改善をサポート。
-セッション管理・指数バックオフリトライ付き。
+画像生成はスタブ（ダッシュボードで別管理）。
+プロンプト管理・セッション・バッチ・リファレンス管理を提供。
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from google import genai
-from google.genai import types
-
 from shingan.prompts.catalog import (
-    PROMPT_CATALOG,
     Prompt,
     get_prompt_by_id,
 )
-from shingan.session import RetryConfig, SessionError, SessionManager, SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +32,7 @@ DEFAULT_OUTPUT_DIR = Path("output")
 class GenerationResult:
     """画像生成の結果。"""
 
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     image_path: Path | None = None
     text: str | None = None
     elapsed_sec: float = 0.0
@@ -44,6 +40,10 @@ class GenerationResult:
     prompt_used: str = ""
     session_id: str | None = None
     error: str | None = None
+    aspect_ratio: str = "1:1"
+    resolution: str = "2K"
+    reference_images: list[str] = field(default_factory=list)
+    status: str = "pending"  # pending / completed / error
 
 
 @dataclass
@@ -61,32 +61,41 @@ class AgentConfig:
 
 
 class ShinGanAgent:
-    """Nano Banana Pro 画像生成エージェント。"""
+    """Nano Banana Pro 画像生成エージェント。
+
+    画像生成自体はスタブ。ダッシュボードで画像を添付・調整する前提。
+    プロンプト構築、セッション管理、バッチ管理、リファレンス画像管理を提供。
+    """
 
     def __init__(self, config: AgentConfig | None = None) -> None:
         self.config = config or AgentConfig()
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        self._session_id: str | None = None
+        self._history: list[GenerationResult] = []
+        self._references: dict[str, list[str]] = {}  # group_name -> [paths]
 
-        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-        if api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            self.client = genai.Client()
+    # =========================================================================
+    # プロンプト構築
+    # =========================================================================
 
-        self._session_mgr: SessionManager | None = None
-        self._history: list[dict] = []
-
-    def _build_config(
+    def build_params(
         self,
+        prompt: str,
+        *,
         prompt_obj: Prompt | None = None,
         aspect_ratio: str | None = None,
         resolution: str | None = None,
         use_thinking: bool | None = None,
         use_search_grounding: bool | None = None,
-    ) -> types.GenerateContentConfig:
-        """生成設定を構築する。"""
-        ar = aspect_ratio or (prompt_obj.aspect_ratio if prompt_obj else self.config.default_aspect_ratio)
-        res = resolution or (prompt_obj.resolution if prompt_obj else self.config.default_resolution)
+        reference_images: list[str] | None = None,
+    ) -> dict:
+        """生成パラメータを dict で構築する。"""
+        ar = aspect_ratio or (
+            prompt_obj.aspect_ratio if prompt_obj else self.config.default_aspect_ratio
+        )
+        res = resolution or (
+            prompt_obj.resolution if prompt_obj else self.config.default_resolution
+        )
         thinking = use_thinking if use_thinking is not None else (
             prompt_obj.use_thinking if prompt_obj else self.config.use_thinking
         )
@@ -94,27 +103,20 @@ class ShinGanAgent:
             prompt_obj.use_search_grounding if prompt_obj else self.config.use_search_grounding
         )
 
-        tools = []
-        if grounding:
-            tools.append({"google_search": {}})
+        return {
+            "model": self.config.model,
+            "prompt": prompt,
+            "aspect_ratio": ar,
+            "resolution": res,
+            "use_thinking": thinking,
+            "use_search_grounding": grounding,
+            "reference_images": reference_images or [],
+            "response_modalities": ["TEXT", "IMAGE"],
+        }
 
-        return types.GenerateContentConfig(
-            response_modalities=["TEXT", "IMAGE"],
-            image_config=types.ImageConfig(
-                aspect_ratio=ar,
-                image_size=res,
-            ),
-            tools=tools if tools else None,
-        )
-
-    def _save_image(self, part, prefix: str = "shingan") -> Path:
-        """画像パートをファイルに保存する。"""
-        timestamp = int(time.time() * 1000)
-        filename = f"{prefix}_{timestamp}.png"
-        filepath = self.config.output_dir / filename
-        image = part.as_image()
-        image.save(str(filepath))
-        return filepath
+    # =========================================================================
+    # 生成（スタブ — 画像はダッシュボードで別管理）
+    # =========================================================================
 
     def generate(
         self,
@@ -124,42 +126,30 @@ class ShinGanAgent:
         resolution: str | None = None,
         use_thinking: bool | None = None,
         use_search_grounding: bool | None = None,
-        save_prefix: str = "shingan",
+        reference_images: list[str] | None = None,
     ) -> GenerationResult:
-        """テキストプロンプトから画像を生成する。"""
-        config = self._build_config(
+        """生成リクエストを作成する（画像はスタブ）。"""
+        params = self.build_params(
+            prompt,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
             use_thinking=use_thinking,
             use_search_grounding=use_search_grounding,
+            reference_images=reference_images,
         )
-
-        start = time.monotonic()
-        response = self.client.models.generate_content(
-            model=self.config.model,
-            contents=[prompt],
-            config=config,
-        )
-        elapsed = time.monotonic() - start
 
         result = GenerationResult(
-            elapsed_sec=elapsed,
-            model=self.config.model,
+            model=params["model"],
             prompt_used=prompt,
+            aspect_ratio=params["aspect_ratio"],
+            resolution=params["resolution"],
+            reference_images=params["reference_images"],
+            status="pending",
+            text="[stub] パラメータ準備完了。ダッシュボードで画像を添付してください。",
         )
 
-        for part in response.parts:
-            if part.text is not None:
-                result.text = part.text
-            elif part.inline_data is not None:
-                result.image_path = self._save_image(part, prefix=save_prefix)
-
-        self._history.append({
-            "role": "user",
-            "prompt": prompt,
-            "result": result,
-        })
-
+        self._save_metadata(result, params)
+        self._history.append(result)
         return result
 
     def generate_from_catalog(
@@ -167,154 +157,216 @@ class ShinGanAgent:
         prompt_id: str,
         *,
         override_prompt: str | None = None,
+        reference_images: list[str] | None = None,
     ) -> GenerationResult:
-        """カタログのプロンプトIDを指定して画像を生成する。"""
+        """カタログのプロンプトIDから生成リクエストを作成する。"""
         prompt_obj = get_prompt_by_id(prompt_id)
         if prompt_obj is None:
             raise ValueError(f"プロンプトID '{prompt_id}' が見つかりません")
 
         text = override_prompt or prompt_obj.prompt
-        config = self._build_config(prompt_obj=prompt_obj)
-
-        start = time.monotonic()
-        response = self.client.models.generate_content(
-            model=self.config.model,
-            contents=[text],
-            config=config,
-        )
-        elapsed = time.monotonic() - start
+        params = self.build_params(text, prompt_obj=prompt_obj, reference_images=reference_images)
 
         result = GenerationResult(
-            elapsed_sec=elapsed,
-            model=self.config.model,
+            model=params["model"],
             prompt_used=text,
+            aspect_ratio=params["aspect_ratio"],
+            resolution=params["resolution"],
+            reference_images=params["reference_images"],
+            status="pending",
+            text=f"[stub] カタログ '{prompt_id}' 準備完了。",
         )
 
-        for part in response.parts:
-            if part.text is not None:
-                result.text = part.text
-            elif part.inline_data is not None:
-                result.image_path = self._save_image(part, prefix=prompt_obj.id)
-
+        self._save_metadata(result, params)
+        self._history.append(result)
         return result
 
+    def _save_metadata(self, result: GenerationResult, params: dict) -> None:
+        """生成メタデータをJSONで保存する。"""
+        meta_path = self.config.output_dir / f"{result.id}_meta.json"
+        meta = {
+            "id": result.id,
+            "prompt": params["prompt"],
+            "model": params["model"],
+            "aspect_ratio": params["aspect_ratio"],
+            "resolution": params["resolution"],
+            "use_thinking": params["use_thinking"],
+            "use_search_grounding": params["use_search_grounding"],
+            "reference_images": params["reference_images"],
+            "status": result.status,
+            "created_at": time.time(),
+        }
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    # =========================================================================
+    # バッチ生成
+    # =========================================================================
+
+    def batch_generate(self, prompts: list[dict]) -> list[GenerationResult]:
+        """複数プロンプトを一括処理する。
+
+        prompts: [{"prompt": "..."}, ...] or [{"prompt_id": "char-pixel-mascot"}, ...]
+        """
+        results = []
+        for item in prompts:
+            if "prompt_id" in item:
+                r = self.generate_from_catalog(
+                    item["prompt_id"],
+                    override_prompt=item.get("override_prompt"),
+                    reference_images=item.get("reference_images"),
+                )
+            else:
+                r = self.generate(
+                    item["prompt"],
+                    aspect_ratio=item.get("aspect_ratio"),
+                    resolution=item.get("resolution"),
+                    use_thinking=item.get("use_thinking"),
+                    use_search_grounding=item.get("use_search_grounding"),
+                    reference_images=item.get("reference_images"),
+                )
+            results.append(r)
+        return results
+
+    def batch_from_category(
+        self,
+        category: str,
+        *,
+        count: int | None = None,
+        reference_images: list[str] | None = None,
+    ) -> list[GenerationResult]:
+        """カテゴリ全体を一括処理する。"""
+        from shingan.prompts.catalog import get_prompts_by_category
+
+        prompts = get_prompts_by_category(category)
+        if not prompts:
+            raise ValueError(f"カテゴリ '{category}' が見つかりません")
+        if count is not None:
+            prompts = prompts[:count]
+
+        return [
+            self.generate_from_catalog(p.id, reference_images=reference_images)
+            for p in prompts
+        ]
+
+    # =========================================================================
+    # リファレンス画像管理
+    # =========================================================================
+
+    def add_references(self, group: str, paths: list[str]) -> list[str]:
+        """リファレンス画像グループに画像パスを追加する。"""
+        if group not in self._references:
+            self._references[group] = []
+        for p in paths:
+            if p not in self._references[group]:
+                self._references[group].append(p)
+        return self._references[group]
+
+    def remove_reference(self, group: str, path: str) -> list[str]:
+        """リファレンス画像を削除する。"""
+        if group in self._references and path in self._references[group]:
+            self._references[group].remove(path)
+        return self._references.get(group, [])
+
+    def get_references(self, group: str | None = None) -> dict[str, list[str]]:
+        """リファレンス画像を取得する。"""
+        if group:
+            return {group: self._references.get(group, [])}
+        return dict(self._references)
+
+    def clear_references(self, group: str | None = None) -> None:
+        """リファレンスをクリアする。"""
+        if group:
+            self._references.pop(group, None)
+        else:
+            self._references.clear()
+
+    # =========================================================================
+    # セッション（スタブ）
+    # =========================================================================
+
     def start_chat(self) -> str:
-        """マルチターンチャットセッションを開始する。セッションIDを返す。"""
-        gen_config = self._build_config()
-        retry_cfg = RetryConfig(
-            max_retries=self.config.max_retries,
-            base_delay_sec=self.config.retry_base_delay,
-        )
-        self._session_mgr = SessionManager(
-            client=self.client,
-            model=self.config.model,
-            config=gen_config,
-            retry_config=retry_cfg,
-        )
-        session_info = self._session_mgr.create_session()
-        logger.info(f"チャットセッション開始: {session_info.session_id}")
-        return session_info.session_id
+        """チャットセッションを開始する。"""
+        self._session_id = uuid.uuid4().hex[:12]
+        return self._session_id
 
     @property
     def session_state(self) -> str | None:
         """現在のセッション状態を返す。"""
-        if self._session_mgr is None:
-            return None
-        return self._session_mgr.session.state.value
+        if self._session_id:
+            return "active"
+        return None
 
-    def chat(self, message: str, save_prefix: str = "chat") -> GenerationResult:
-        """チャットセッションでメッセージを送信し、画像を生成/編集する。"""
-        if self._session_mgr is None or not self._session_mgr.is_active:
+    def chat(self, message: str) -> GenerationResult:
+        """チャットメッセージ（スタブ）。"""
+        if not self._session_id:
             self.start_chat()
-
-        start = time.monotonic()
-        try:
-            response = self._session_mgr.send_message(message)
-        except SessionError as e:
-            logger.error(f"チャットエラー: {e}")
-            return GenerationResult(
-                elapsed_sec=time.monotonic() - start,
-                model=self.config.model,
-                prompt_used=message,
-                session_id=self._session_mgr.session.session_id,
-                error=str(e),
-            )
-        elapsed = time.monotonic() - start
-
         result = GenerationResult(
-            elapsed_sec=elapsed,
             model=self.config.model,
             prompt_used=message,
-            session_id=self._session_mgr.session.session_id,
+            session_id=self._session_id,
+            status="pending",
+            text="[stub] チャットメッセージ受信。ダッシュボードで画像を添付してください。",
         )
-
-        for part in response.parts:
-            if part.text is not None:
-                result.text = part.text
-            elif part.inline_data is not None:
-                result.image_path = self._save_image(part, prefix=save_prefix)
-
-        self._history.append({
-            "role": "user",
-            "prompt": message,
-            "result": result,
-        })
-
+        self._save_metadata(result, self.build_params(message))
+        self._history.append(result)
         return result
 
     def reset_chat(self) -> str:
-        """チャットセッションをリセットする。新しいセッションIDを返す。"""
-        if self._session_mgr:
-            session_info = self._session_mgr.reset()
-            return session_info.session_id
+        """セッションリセット。"""
         return self.start_chat()
 
     def close_chat(self) -> None:
-        """チャットセッションを閉じる。"""
-        if self._session_mgr:
-            self._session_mgr.close()
-            self._session_mgr = None
+        """セッションを閉じる。"""
+        self._session_id = None
 
-    def edit_image(
-        self,
-        image_path: str | Path,
-        edit_prompt: str,
-        *,
-        aspect_ratio: str | None = None,
-        resolution: str | None = None,
-    ) -> GenerationResult:
-        """既存画像を編集プロンプトで修正する。"""
-        from PIL import Image
+    # =========================================================================
+    # 画像添付（ダッシュボードから）
+    # =========================================================================
 
-        img = Image.open(str(image_path))
-        config = self._build_config(
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-        )
+    def attach_image(self, result_id: str, image_path: str) -> GenerationResult | None:
+        """生成結果に画像を添付する（ダッシュボードから呼ばれる）。"""
+        for r in self._history:
+            if r.id == result_id:
+                r.image_path = Path(image_path)
+                r.status = "completed"
+                meta_path = self.config.output_dir / f"{r.id}_meta.json"
+                if meta_path.exists():
+                    meta = json.loads(meta_path.read_text())
+                    meta["image_path"] = image_path
+                    meta["status"] = "completed"
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+                return r
+        return None
 
-        start = time.monotonic()
-        response = self.client.models.generate_content(
-            model=self.config.model,
-            contents=[edit_prompt, img],
-            config=config,
-        )
-        elapsed = time.monotonic() - start
-
-        result = GenerationResult(
-            elapsed_sec=elapsed,
-            model=self.config.model,
-            prompt_used=edit_prompt,
-        )
-
-        for part in response.parts:
-            if part.text is not None:
-                result.text = part.text
-            elif part.inline_data is not None:
-                result.image_path = self._save_image(part, prefix="edit")
-
-        return result
+    # =========================================================================
+    # 履歴
+    # =========================================================================
 
     @property
-    def history(self) -> list[dict]:
+    def history(self) -> list[GenerationResult]:
         """生成履歴を返す。"""
         return list(self._history)
+
+    def get_result(self, result_id: str) -> GenerationResult | None:
+        """IDで生成結果を取得する。"""
+        for r in self._history:
+            if r.id == result_id:
+                return r
+        return None
+
+    def export_history(self) -> list[dict]:
+        """履歴をエクスポート可能なdictリストで返す。"""
+        return [
+            {
+                "id": r.id,
+                "prompt": r.prompt_used,
+                "model": r.model,
+                "aspect_ratio": r.aspect_ratio,
+                "resolution": r.resolution,
+                "status": r.status,
+                "image_path": str(r.image_path) if r.image_path else None,
+                "reference_images": r.reference_images,
+                "error": r.error,
+            }
+            for r in self._history
+        ]
