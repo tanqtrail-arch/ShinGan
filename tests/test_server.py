@@ -148,3 +148,108 @@ def test_session_flow(client):
     # close
     resp = client.delete("/api/session")
     assert resp.status_code == 200
+
+
+# === 真贋クイズ ===
+
+def _create_test_quiz(client):
+    """テスト用クイズを作成するヘルパー。"""
+    import io
+    real_img = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    fake_img = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    resp = client.post(
+        "/api/quiz",
+        data={"title": "テスト作品", "explanation": "本物は色が鮮やか"},
+        files=[
+            ("real_image", ("real.png", real_img, "image/png")),
+            ("fake_image", ("fake.png", fake_img, "image/png")),
+        ],
+    )
+    return resp
+
+
+def test_quiz_create(client):
+    resp = _create_test_quiz(client)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "テスト作品"
+    assert data["ready"] is True
+    assert data["explanation"] == "本物は色が鮮やか"
+
+
+def test_quiz_list(client):
+    _create_test_quiz(client)
+    resp = client.get("/api/quiz")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    assert data[0]["title"] == "テスト作品"
+
+
+def test_quiz_get(client):
+    create_resp = _create_test_quiz(client)
+    quiz_id = create_resp.json()["id"]
+    resp = client.get(f"/api/quiz/{quiz_id}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == quiz_id
+
+
+def test_quiz_get_not_found(client):
+    assert client.get("/api/quiz/nonexistent").status_code == 404
+
+
+def test_quiz_play(client):
+    create_resp = _create_test_quiz(client)
+    quiz_id = create_resp.json()["id"]
+    resp = client.get(f"/api/quiz/{quiz_id}/play")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == quiz_id
+    assert data["answer"] in ("left", "right")
+    assert data["left_image_url"]
+    assert data["right_image_url"]
+
+
+def test_quiz_answer_correct(client):
+    create_resp = _create_test_quiz(client)
+    quiz_id = create_resp.json()["id"]
+    play_resp = client.get(f"/api/quiz/{quiz_id}/play")
+    correct_side = play_resp.json()["answer"]
+    resp = client.post(
+        f"/api/quiz/{quiz_id}/answer",
+        json={"choice": correct_side, "correct_side": correct_side},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] is True
+    assert data["explanation"] == ""
+
+
+def test_quiz_answer_incorrect(client):
+    create_resp = _create_test_quiz(client)
+    quiz_id = create_resp.json()["id"]
+    play_resp = client.get(f"/api/quiz/{quiz_id}/play")
+    correct_side = play_resp.json()["answer"]
+    wrong_side = "right" if correct_side == "left" else "left"
+    resp = client.post(
+        f"/api/quiz/{quiz_id}/answer",
+        json={"choice": wrong_side, "correct_side": correct_side},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] is False
+    assert data["explanation"] == "本物は色が鮮やか"
+
+
+def test_quiz_delete(client):
+    create_resp = _create_test_quiz(client)
+    quiz_id = create_resp.json()["id"]
+    resp = client.delete(f"/api/quiz/{quiz_id}")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deleted"
+    # 削除後は404
+    assert client.get(f"/api/quiz/{quiz_id}").status_code == 404
+
+
+def test_quiz_delete_not_found(client):
+    assert client.delete("/api/quiz/nonexistent").status_code == 404

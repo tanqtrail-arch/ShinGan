@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -60,6 +61,23 @@ class AgentConfig:
     retry_base_delay: float = 2.0
 
 
+@dataclass
+class QuizItem:
+    """真贋クイズの問題。"""
+
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    title: str = ""  # 作品名
+    real_image_path: Path | None = None  # A欄: 本物
+    fake_image_path: Path | None = None  # B欄: 偽物
+    explanation: str = ""  # 真贋ポイント（解説）
+    created_at: float = field(default_factory=time.time)
+
+    @property
+    def ready(self) -> bool:
+        """両方の画像がアップロード済みか。"""
+        return self.real_image_path is not None and self.fake_image_path is not None
+
+
 class ShinGanAgent:
     """Nano Banana Pro 画像生成エージェント。
 
@@ -73,6 +91,7 @@ class ShinGanAgent:
         self._session_id: str | None = None
         self._history: list[GenerationResult] = []
         self._references: dict[str, list[str]] = {}  # group_name -> [paths]
+        self._quizzes: list[QuizItem] = []
 
     # =========================================================================
     # プロンプト構築
@@ -370,3 +389,126 @@ class ShinGanAgent:
             }
             for r in self._history
         ]
+
+    # =========================================================================
+    # 真贋クイズ
+    # =========================================================================
+
+    def create_quiz(self, title: str, explanation: str = "") -> QuizItem:
+        """クイズ問題を作成する。"""
+        quiz_dir = self.config.output_dir / "quiz"
+        quiz_dir.mkdir(parents=True, exist_ok=True)
+        item = QuizItem(title=title, explanation=explanation)
+        self._quizzes.append(item)
+        self._save_quiz_meta(item)
+        return item
+
+    def get_quiz(self, quiz_id: str) -> QuizItem | None:
+        """IDでクイズを取得する。"""
+        for q in self._quizzes:
+            if q.id == quiz_id:
+                return q
+        return None
+
+    @property
+    def quiz_list(self) -> list[QuizItem]:
+        """全クイズ一覧を返す。"""
+        return list(self._quizzes)
+
+    def delete_quiz(self, quiz_id: str) -> bool:
+        """クイズを削除する。"""
+        for i, q in enumerate(self._quizzes):
+            if q.id == quiz_id:
+                self._quizzes.pop(i)
+                meta_path = self.config.output_dir / "quiz" / f"{quiz_id}_meta.json"
+                if meta_path.exists():
+                    meta_path.unlink()
+                return True
+        return False
+
+    def attach_quiz_image(
+        self, quiz_id: str, image_type: str, image_path: str
+    ) -> QuizItem | None:
+        """クイズに画像を添付する。image_type: 'real' or 'fake'"""
+        item = self.get_quiz(quiz_id)
+        if item is None:
+            return None
+        if image_type == "real":
+            item.real_image_path = Path(image_path)
+        elif image_type == "fake":
+            item.fake_image_path = Path(image_path)
+        else:
+            return None
+        self._save_quiz_meta(item)
+        return item
+
+    def play_quiz(self, quiz_id: str) -> dict | None:
+        """クイズ出題用データを返す（本物の位置をランダム化）。"""
+        item = self.get_quiz(quiz_id)
+        if item is None or not item.ready:
+            return None
+        real_on_left = random.choice([True, False])
+        if real_on_left:
+            left_path = item.real_image_path
+            right_path = item.fake_image_path
+        else:
+            left_path = item.fake_image_path
+            right_path = item.real_image_path
+        return {
+            "id": item.id,
+            "title": item.title,
+            "left_image": str(left_path),
+            "right_image": str(right_path),
+            "answer": "left" if real_on_left else "right",
+        }
+
+    def answer_quiz(self, quiz_id: str, choice: str, correct_side: str) -> dict:
+        """クイズの回答を判定する。"""
+        item = self.get_quiz(quiz_id)
+        if item is None:
+            return {"correct": False, "error": "クイズが見つかりません"}
+        is_correct = choice == correct_side
+        result = {
+            "correct": is_correct,
+            "title": item.title,
+            "explanation": item.explanation if not is_correct else "",
+        }
+        return result
+
+    def _save_quiz_meta(self, item: QuizItem) -> None:
+        """クイズメタデータをJSONで保存する。"""
+        quiz_dir = self.config.output_dir / "quiz"
+        quiz_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = quiz_dir / f"{item.id}_meta.json"
+        meta = {
+            "id": item.id,
+            "title": item.title,
+            "explanation": item.explanation,
+            "real_image_path": str(item.real_image_path) if item.real_image_path else None,
+            "fake_image_path": str(item.fake_image_path) if item.fake_image_path else None,
+            "created_at": item.created_at,
+        }
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    def load_quizzes(self) -> None:
+        """ディスクからクイズメタデータを読み込む。"""
+        quiz_dir = self.config.output_dir / "quiz"
+        if not quiz_dir.exists():
+            return
+        for meta_path in sorted(quiz_dir.glob("*_meta.json")):
+            try:
+                meta = json.loads(meta_path.read_text())
+                item = QuizItem(
+                    id=meta["id"],
+                    title=meta["title"],
+                    explanation=meta.get("explanation", ""),
+                    created_at=meta.get("created_at", 0.0),
+                )
+                if meta.get("real_image_path"):
+                    item.real_image_path = Path(meta["real_image_path"])
+                if meta.get("fake_image_path"):
+                    item.fake_image_path = Path(meta["fake_image_path"])
+                if not any(q.id == item.id for q in self._quizzes):
+                    self._quizzes.append(item)
+            except (json.JSONDecodeError, KeyError):
+                logger.warning("クイズメタデータの読み込みに失敗: %s", meta_path)

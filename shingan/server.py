@@ -31,6 +31,13 @@ ShinGan Web API - FastAPI サーバー
   POST /api/session/chat            - チャット
   DELETE /api/session               - セッション終了
   GET  /api/session/state           - セッション状態
+  -- 真贋クイズ --
+  POST /api/quiz                    - クイズ作成（画像アップロード）
+  GET  /api/quiz                    - クイズ一覧
+  GET  /api/quiz/{id}               - クイズ詳細
+  GET  /api/quiz/{id}/play          - クイズ出題（ランダム配置）
+  POST /api/quiz/{id}/answer        - クイズ回答判定
+  DELETE /api/quiz/{id}             - クイズ削除
   -- 静的ファイル --
   GET  /                            - ダッシュボード
 """
@@ -41,13 +48,13 @@ import logging
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from shingan.agent import AgentConfig, GenerationResult, ShinGanAgent
+from shingan.agent import AgentConfig, GenerationResult, QuizItem, ShinGanAgent
 from shingan.builder import PromptDraft, get_presets
 from shingan.config import Settings
 from shingan.prompts.catalog import (
@@ -141,6 +148,35 @@ class HealthResponse(BaseModel):
     version: str = "0.1.0"
 
 
+class QuizResponse(BaseModel):
+    id: str
+    title: str
+    real_image_url: str | None = None
+    fake_image_url: str | None = None
+    explanation: str = ""
+    ready: bool = False
+    created_at: float = 0.0
+
+
+class QuizPlayResponse(BaseModel):
+    id: str
+    title: str
+    left_image_url: str
+    right_image_url: str
+    answer: str  # "left" or "right"
+
+
+class QuizAnswerRequest(BaseModel):
+    choice: str  # "left" or "right"
+    correct_side: str  # "left" or "right" (from play response)
+
+
+class QuizAnswerResponse(BaseModel):
+    correct: bool
+    title: str = ""
+    explanation: str = ""
+
+
 # === ヘルパー ===
 
 def _result_to_response(result: GenerationResult) -> GenerateResponse:
@@ -160,6 +196,24 @@ def _result_to_response(result: GenerationResult) -> GenerateResponse:
     if result.image_path and result.image_path.exists():
         resp.image_url = f"/api/images/{result.image_path.name}"
     return resp
+
+
+def _quiz_to_response(item: QuizItem) -> QuizResponse:
+    real_url = None
+    fake_url = None
+    if item.real_image_path and item.real_image_path.exists():
+        real_url = f"/api/images/{item.real_image_path.name}"
+    if item.fake_image_path and item.fake_image_path.exists():
+        fake_url = f"/api/images/{item.fake_image_path.name}"
+    return QuizResponse(
+        id=item.id,
+        title=item.title,
+        real_image_url=real_url,
+        fake_image_url=fake_url,
+        explanation=item.explanation,
+        ready=item.ready,
+        created_at=item.created_at,
+    )
 
 
 # === アプリ構築 ===
@@ -190,6 +244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         retry_base_delay=settings.retry_base_delay,
     )
     agent = ShinGanAgent(config)
+    agent.load_quizzes()
 
     # --- ヘルスチェック ---
     @app.get("/api/health", response_model=HealthResponse)
@@ -361,10 +416,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         agent.close_chat()
         return {"status": "closed"}
 
+    # --- 真贋クイズ ---
+    @app.post("/api/quiz", response_model=QuizResponse)
+    async def create_quiz(
+        title: str = Form(...),
+        explanation: str = Form(""),
+        real_image: UploadFile = File(...),
+        fake_image: UploadFile = File(...),
+    ):
+        item = agent.create_quiz(title, explanation)
+        quiz_dir = config.output_dir / "quiz"
+        quiz_dir.mkdir(parents=True, exist_ok=True)
+
+        real_path = quiz_dir / f"{item.id}_real_{real_image.filename}"
+        with open(real_path, "wb") as f:
+            shutil.copyfileobj(real_image.file, f)
+        agent.attach_quiz_image(item.id, "real", str(real_path))
+
+        fake_path = quiz_dir / f"{item.id}_fake_{fake_image.filename}"
+        with open(fake_path, "wb") as f:
+            shutil.copyfileobj(fake_image.file, f)
+        agent.attach_quiz_image(item.id, "fake", str(fake_path))
+
+        return _quiz_to_response(item)
+
+    @app.get("/api/quiz", response_model=list[QuizResponse])
+    def list_quizzes():
+        return [_quiz_to_response(q) for q in agent.quiz_list]
+
+    @app.get("/api/quiz/{quiz_id}", response_model=QuizResponse)
+    def get_quiz(quiz_id: str):
+        item = agent.get_quiz(quiz_id)
+        if item is None:
+            raise HTTPException(404, f"クイズ '{quiz_id}' が見つかりません")
+        return _quiz_to_response(item)
+
+    @app.get("/api/quiz/{quiz_id}/play", response_model=QuizPlayResponse)
+    def play_quiz(quiz_id: str):
+        data = agent.play_quiz(quiz_id)
+        if data is None:
+            raise HTTPException(404, "クイズが見つからないか、画像が未登録です")
+        left_name = Path(data["left_image"]).name
+        right_name = Path(data["right_image"]).name
+        return QuizPlayResponse(
+            id=data["id"],
+            title=data["title"],
+            left_image_url=f"/api/images/{left_name}",
+            right_image_url=f"/api/images/{right_name}",
+            answer=data["answer"],
+        )
+
+    @app.post("/api/quiz/{quiz_id}/answer", response_model=QuizAnswerResponse)
+    def answer_quiz(quiz_id: str, req: QuizAnswerRequest):
+        result = agent.answer_quiz(quiz_id, req.choice, req.correct_side)
+        if "error" in result:
+            raise HTTPException(404, result["error"])
+        return QuizAnswerResponse(**result)
+
+    @app.delete("/api/quiz/{quiz_id}")
+    def delete_quiz(quiz_id: str):
+        if not agent.delete_quiz(quiz_id):
+            raise HTTPException(404, f"クイズ '{quiz_id}' が見つかりません")
+        return {"status": "deleted", "id": quiz_id}
+
     # --- 生成画像の配信 ---
     @app.get("/api/images/{filename}")
     def get_image(filename: str):
         filepath = config.output_dir / filename
+        if not filepath.exists():
+            filepath = config.output_dir / "quiz" / filename
         if not filepath.exists():
             raise HTTPException(404, "画像が見つかりません")
         return FileResponse(filepath, media_type="image/png")
