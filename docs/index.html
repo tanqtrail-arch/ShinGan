@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShinGan - Nano Banana Pro Agent</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f13;--surface:#1a1a22;--surface2:#23232e;--border:#2d2d3a;--text:#e4e4ef;--dim:#8888a0;--accent:#ff6b4a;--accent2:#ff8f73;--green:#4ade80;--blue:#60a5fa;--tag:#2a2a3a}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:22px;color:var(--accent)}
+header .subtitle{color:var(--dim);font-size:13px}
+nav{margin-left:auto;display:flex;gap:4px}
+.nav-btn{background:transparent;border:1px solid var(--border);color:var(--dim);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;transition:.15s}
+.nav-btn:hover{border-color:var(--accent);color:var(--text)}
+.nav-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+main{padding:20px 24px;max-width:1200px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+
+/* Hero */
+.hero{text-align:center;padding:48px 0 32px}
+.hero h2{font-size:28px;margin-bottom:8px}
+.hero p{color:var(--dim);max-width:600px;margin:0 auto 24px;line-height:1.6}
+.hero-stats{display:flex;gap:24px;justify-content:center;flex-wrap:wrap}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 24px;text-align:center}
+.stat .num{font-size:24px;font-weight:700;color:var(--accent)}
+.stat .label{font-size:12px;color:var(--dim);margin-top:4px}
+
+/* Features */
+.features{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin:32px 0}
+.feature{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px}
+.feature h4{color:var(--accent);font-size:14px;margin-bottom:6px}
+.feature p{font-size:12px;color:var(--dim);line-height:1.5}
+
+/* Install */
+.install{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin:24px 0}
+.install h3{font-size:15px;margin-bottom:12px;color:var(--accent)}
+.install pre{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:13px;color:var(--green);overflow-x:auto;line-height:1.6}
+
+/* Toolbar/Filter */
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:6px;font-size:13px}
+
+/* Card grid */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;transition:.15s}
+.card:hover{border-color:var(--accent)}
+.card h3{font-size:14px;color:var(--accent);margin-bottom:4px}
+.card .meta{color:var(--dim);font-size:12px;margin-bottom:8px}
+.card .prompt-text{font-size:12px;color:var(--dim);line-height:1.5;max-height:72px;overflow:hidden}
+.card .tags{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+.tag{background:var(--tag);padding:2px 8px;border-radius:4px;font-size:11px;color:var(--dim)}
+.card .copy-btn{margin-top:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;transition:.15s}
+.card .copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* API */
+.api-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+.api-table th{text-align:left;color:var(--dim);font-size:11px;padding:6px 10px;border-bottom:1px solid var(--border)}
+.api-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
+.api-table .method{font-weight:700;font-family:monospace;width:60px}
+.api-table .method-get{color:var(--green)}
+.api-table .method-post{color:var(--blue)}
+.api-table .method-delete{color:#f87171}
+.api-table .path{font-family:monospace;color:var(--accent2)}
+
+footer{text-align:center;padding:32px;color:var(--dim);font-size:12px;border-top:1px solid var(--border);margin-top:40px}
+footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>ShinGan</h1>
+  <span class="subtitle">Nano Banana Pro Agent</span>
+  <nav>
+    <button class="nav-btn active" data-tab="home">Home</button>
+    <button class="nav-btn" data-tab="catalog">Catalog</button>
+    <button class="nav-btn" data-tab="api">API</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Home -->
+  <section id="tab-home" class="tab active">
+    <div class="hero">
+      <h2>ShinGan</h2>
+      <p>Nano Banana Pro (Gemini 3 Pro Image) 画像生成エージェント。プロンプトカタログ、インタラクティブビルダー、バッチ生成、リファレンス画像管理をオールインワンで。</p>
+      <div class="hero-stats">
+        <div class="stat"><div class="num">20</div><div class="label">Prompts</div></div>
+        <div class="stat"><div class="num">10</div><div class="label">Categories</div></div>
+        <div class="stat"><div class="num">24</div><div class="label">API Endpoints</div></div>
+        <div class="stat"><div class="num">54</div><div class="label">Tests</div></div>
+      </div>
+    </div>
+
+    <div class="features">
+      <div class="feature"><h4>Prompt Catalog</h4><p>10カテゴリ×20プロンプト。キャラクター、背景、UI、プロダクト、ロゴなど幅広いジャンルを網羅。</p></div>
+      <div class="feature"><h4>Prompt Builder</h4><p>9ステップの構造化プロンプト生成。スタイル・構図・ライティングのプリセット付き。</p></div>
+      <div class="feature"><h4>Batch Generation</h4><p>カテゴリ一括またはカスタムリストでのバッチ生成。大量のプロンプトを一度に処理。</p></div>
+      <div class="feature"><h4>Reference Images</h4><p>グループベースのリファレンス画像管理。1グループ最大14枚まで。</p></div>
+      <div class="feature"><h4>Image Attach</h4><p>ダッシュボードから画像をアタッチして管理。generate → pending → attach → completed のワークフロー。</p></div>
+      <div class="feature"><h4>REST API</h4><p>FastAPI 24エンドポイント + Swagger自動ドキュメント。フル機能のAPI。</p></div>
+    </div>
+
+    <div class="install">
+      <h3>Quick Start</h3>
+      <pre>pip install -e .
+
+# Dashboard (localhost:8080)
+shingan serve
+
+# CLI
+shingan list                      # Prompt catalog
+shingan show char-pixel-mascot    # Prompt details
+shingan build                     # Interactive builder
+shingan batch -c character        # Batch generate
+shingan gen "A cute robot" -r 4K  # Free prompt</pre>
+    </div>
+  </section>
+
+  <!-- Catalog -->
+  <section id="tab-catalog" class="tab">
+    <div class="toolbar">
+      <select id="cat-filter"><option value="">All Categories</option></select>
+      <span id="cat-count"></span>
+    </div>
+    <div id="prompt-grid" class="card-grid"></div>
+  </section>
+
+  <!-- API -->
+  <section id="tab-api" class="tab">
+    <h3 style="margin-bottom:8px">API Endpoints</h3>
+    <p style="font-size:13px;color:var(--dim);margin-bottom:16px"><code>shingan serve</code> → <code>http://localhost:8080</code> / Swagger: <code>/docs</code></p>
+    <table class="api-table">
+      <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+      <tbody id="api-body"></tbody>
+    </table>
+  </section>
+</main>
+
+<footer>
+  <a href="https://github.com/tanqtrail-arch/ShinGan">GitHub</a> &middot; Powered by Nano Banana Pro (Gemini 3 Pro Image)
+</footer>
+
+<script>
+// Tab navigation
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// Load catalog from static JSON
+let allPrompts = [];
+fetch('catalog.json')
+  .then(r => r.json())
+  .then(data => {
+    allPrompts = data;
+    renderCatalog(data);
+    fillCategories(data);
+  });
+
+function renderCatalog(prompts) {
+  const grid = document.getElementById('prompt-grid');
+  document.getElementById('cat-count').textContent = prompts.length + ' prompts';
+  grid.innerHTML = prompts.map(p => `
+    <div class="card">
+      <h3>${p.name_ja}</h3>
+      <div class="meta">${p.category_label} | ${p.resolution} | ${p.aspect_ratio}</div>
+      <div class="prompt-text">${p.prompt}</div>
+      <div class="tags">
+        ${p.use_thinking ? '<span class="tag">Thinking</span>' : ''}
+        ${p.use_search_grounding ? '<span class="tag">Search</span>' : ''}
+        <span class="tag">${p.id}</span>
+      </div>
+      <button class="copy-btn" onclick="copyPrompt(this, '${p.id}')">Copy Prompt</button>
+    </div>
+  `).join('');
+}
+
+function fillCategories(data) {
+  const cats = {};
+  data.forEach(p => {
+    if (!cats[p.category]) cats[p.category] = {label: p.category_label, count: 0};
+    cats[p.category].count++;
+  });
+  const sel = document.getElementById('cat-filter');
+  Object.entries(cats).forEach(([id, c]) => {
+    sel.innerHTML += `<option value="${id}">${c.label} (${c.count})</option>`;
+  });
+}
+
+document.getElementById('cat-filter').addEventListener('change', e => {
+  const v = e.target.value;
+  renderCatalog(v ? allPrompts.filter(p => p.category === v) : allPrompts);
+});
+
+function copyPrompt(btn, id) {
+  const p = allPrompts.find(x => x.id === id);
+  if (p) {
+    navigator.clipboard.writeText(p.prompt).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy Prompt', 1500);
+    });
+  }
+}
+
+// API table
+const endpoints = [
+  ['GET', '/api/health', 'Health check'],
+  ['GET', '/api/prompts', 'List all prompts'],
+  ['GET', '/api/prompts/{id}', 'Get prompt by ID'],
+  ['GET', '/api/categories', 'List categories'],
+  ['POST', '/api/generate', 'Generate from free prompt'],
+  ['POST', '/api/generate/{id}', 'Generate from catalog prompt'],
+  ['POST', '/api/batch', 'Batch generate from prompt list'],
+  ['POST', '/api/batch/category', 'Batch generate by category'],
+  ['GET', '/api/references', 'List all reference groups'],
+  ['POST', '/api/references/{group}', 'Add references to group'],
+  ['DELETE', '/api/references/{group}', 'Delete reference group'],
+  ['POST', '/api/attach/{result_id}', 'Attach image to result'],
+  ['GET', '/api/builder/presets', 'Get builder presets'],
+  ['POST', '/api/builder/compile', 'Compile structured prompt'],
+  ['GET', '/api/history', 'Get generation history'],
+  ['GET', '/api/history/export', 'Export history as JSON'],
+  ['GET', '/api/history/{id}', 'Get single result'],
+  ['POST', '/api/session', 'Create chat session'],
+  ['POST', '/api/session/chat', 'Send chat message'],
+  ['GET', '/api/session/state', 'Get session state'],
+  ['DELETE', '/api/session', 'Close session'],
+  ['GET', '/api/images/{file}', 'Serve attached image'],
+];
+const tbody = document.getElementById('api-body');
+tbody.innerHTML = endpoints.map(([m, p, d]) =>
+  `<tr><td class="method method-${m.toLowerCase()}">${m}</td><td class="path">${p}</td><td>${d}</td></tr>`
+).join('');
+</script>
+</body>
+</html>
