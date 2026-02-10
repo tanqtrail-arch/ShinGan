@@ -235,6 +235,249 @@ document.getElementById('btn-attach-submit').addEventListener('click', async () 
   }
 });
 
+// === 真贋クイズ ===
+
+// -- モード切替 --
+function showQuizPanel(panelId) {
+  ['quiz-create', 'quiz-list', 'quiz-play'].forEach(id => {
+    document.getElementById(id).classList.add('hidden');
+  });
+  document.getElementById(panelId).classList.remove('hidden');
+}
+
+document.getElementById('btn-quiz-create-mode').addEventListener('click', () => showQuizPanel('quiz-create'));
+document.getElementById('btn-quiz-list-mode').addEventListener('click', () => {
+  showQuizPanel('quiz-list');
+  loadQuizList();
+});
+document.getElementById('btn-quiz-play-mode').addEventListener('click', () => {
+  showQuizPanel('quiz-play');
+  initQuizPlay();
+});
+
+// -- 画像プレビュー --
+function setupFilePreview(fileInputId, previewId, zoneId) {
+  const input = document.getElementById(fileInputId);
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    const preview = document.getElementById(previewId);
+    const zone = document.getElementById(zoneId);
+    const reader = new FileReader();
+    reader.onload = e => {
+      preview.innerHTML = `<img src="${e.target.result}">`;
+      preview.classList.remove('hidden');
+      zone.querySelector('span').textContent = file.name;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+setupFilePreview('quiz-real-file', 'quiz-real-preview', 'quiz-real-zone');
+setupFilePreview('quiz-fake-file', 'quiz-fake-preview', 'quiz-fake-zone');
+
+// -- クイズ登録 --
+document.getElementById('btn-quiz-submit').addEventListener('click', async () => {
+  const title = document.getElementById('quiz-title').value.trim();
+  const explanation = document.getElementById('quiz-explanation').value.trim();
+  const realFile = document.getElementById('quiz-real-file').files[0];
+  const fakeFile = document.getElementById('quiz-fake-file').files[0];
+
+  if (!title) return alert('作品名を入力してください');
+  if (!realFile) return alert('本物画像を選択してください');
+  if (!fakeFile) return alert('偽物画像を選択してください');
+
+  const form = new FormData();
+  form.append('title', title);
+  form.append('explanation', explanation);
+  form.append('real_image', realFile);
+  form.append('fake_image', fakeFile);
+
+  const res = await fetch(`${API}/quiz`, { method: 'POST', body: form });
+  if (res.ok) {
+    const data = await res.json();
+    alert(`クイズ登録完了: ${data.title} (${data.id})`);
+    // フォームリセット
+    document.getElementById('quiz-title').value = '';
+    document.getElementById('quiz-explanation').value = '';
+    document.getElementById('quiz-real-file').value = '';
+    document.getElementById('quiz-fake-file').value = '';
+    document.getElementById('quiz-real-preview').classList.add('hidden');
+    document.getElementById('quiz-fake-preview').classList.add('hidden');
+    document.getElementById('quiz-real-zone').querySelector('span').textContent = 'クリックして画像を選択';
+    document.getElementById('quiz-fake-zone').querySelector('span').textContent = 'クリックして画像を選択';
+  } else {
+    alert('登録に失敗しました');
+  }
+});
+
+// -- クイズ一覧 --
+async function loadQuizList() {
+  const res = await fetch(`${API}/quiz`);
+  const quizzes = await res.json();
+  const el = document.getElementById('quiz-list-items');
+  if (quizzes.length === 0) {
+    el.innerHTML = '<p style="color:var(--dim)">まだクイズが登録されていません。</p>';
+    return;
+  }
+  el.innerHTML = quizzes.map(q => `
+    <div class="quiz-list-card">
+      ${q.real_image_url ? `<img class="quiz-list-thumb" src="${q.real_image_url}">` : '<div class="quiz-list-thumb"></div>'}
+      <div class="quiz-list-info">
+        <h4>${q.title}</h4>
+        <div class="ql-meta">ID: ${q.id} | 解説: ${q.explanation ? q.explanation.substring(0, 40) + '...' : '(なし)'}</div>
+      </div>
+      <span class="quiz-list-status ${q.ready ? '' : 'not-ready'}">${q.ready ? '出題可能' : '画像未登録'}</span>
+      <button onclick="deleteQuiz('${q.id}')" style="font-size:11px;margin-left:8px">削除</button>
+    </div>
+  `).join('');
+}
+
+async function deleteQuiz(id) {
+  if (!confirm('このクイズを削除しますか？')) return;
+  await fetch(`${API}/quiz/${id}`, { method: 'DELETE' });
+  loadQuizList();
+}
+
+// -- 連続出題モード --
+let quizSession = {
+  items: [],
+  current: 0,
+  score: 0,
+  answers: [],
+  currentAnswer: null,
+};
+
+async function initQuizPlay() {
+  const res = await fetch(`${API}/quiz`);
+  const all = await res.json();
+  const ready = all.filter(q => q.ready);
+
+  document.getElementById('quiz-play-setup').classList.remove('hidden');
+  document.getElementById('quiz-play-area').classList.add('hidden');
+  document.getElementById('quiz-final-result').classList.add('hidden');
+  document.getElementById('quiz-play-count').textContent = `出題可能な問題: ${ready.length}問`;
+  document.getElementById('btn-quiz-start').disabled = ready.length === 0;
+}
+
+document.getElementById('btn-quiz-start').addEventListener('click', async () => {
+  const res = await fetch(`${API}/quiz`);
+  const all = await res.json();
+  const ready = all.filter(q => q.ready);
+  if (ready.length === 0) return;
+
+  // シャッフル
+  for (let i = ready.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ready[i], ready[j]] = [ready[j], ready[i]];
+  }
+
+  quizSession = { items: ready, current: 0, score: 0, answers: [], currentAnswer: null };
+  document.getElementById('quiz-play-setup').classList.add('hidden');
+  document.getElementById('quiz-final-result').classList.add('hidden');
+  document.getElementById('quiz-play-area').classList.remove('hidden');
+  loadQuizQuestion();
+});
+
+async function loadQuizQuestion() {
+  const item = quizSession.items[quizSession.current];
+  const res = await fetch(`${API}/quiz/${item.id}/play`);
+  const data = await res.json();
+  quizSession.currentAnswer = data.answer;
+
+  document.getElementById('quiz-progress-text').textContent =
+    `${quizSession.current + 1} / ${quizSession.items.length}`;
+  document.getElementById('quiz-score-text').textContent =
+    `正解: ${quizSession.score}`;
+  document.getElementById('quiz-play-title').textContent = `「${data.title}」`;
+  document.getElementById('quiz-left-img').src = data.left_image_url;
+  document.getElementById('quiz-right-img').src = data.right_image_url;
+
+  // ボタン有効化
+  document.getElementById('btn-quiz-left').disabled = false;
+  document.getElementById('btn-quiz-right').disabled = false;
+  document.getElementById('quiz-result-area').classList.add('hidden');
+  document.getElementById('quiz-explanation-display').classList.add('hidden');
+}
+
+async function submitQuizAnswer(choice) {
+  const item = quizSession.items[quizSession.current];
+  document.getElementById('btn-quiz-left').disabled = true;
+  document.getElementById('btn-quiz-right').disabled = true;
+
+  const res = await fetch(`${API}/quiz/${item.id}/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ choice, correct_side: quizSession.currentAnswer })
+  });
+  const result = await res.json();
+
+  const banner = document.getElementById('quiz-result-banner');
+  if (result.correct) {
+    quizSession.score++;
+    banner.textContent = '正解！';
+    banner.className = 'correct';
+  } else {
+    banner.textContent = '不正解…';
+    banner.className = 'incorrect';
+    if (result.explanation) {
+      const expEl = document.getElementById('quiz-explanation-display');
+      expEl.innerHTML = `<div class="exp-label">真贋ポイント</div><div class="exp-text">${result.explanation}</div>`;
+      expEl.classList.remove('hidden');
+    }
+  }
+
+  quizSession.answers.push({
+    title: item.title,
+    correct: result.correct,
+    explanation: result.explanation || '',
+  });
+
+  document.getElementById('quiz-score-text').textContent = `正解: ${quizSession.score}`;
+  document.getElementById('quiz-result-area').classList.remove('hidden');
+
+  // 最終問題なら「次の問題へ」を「結果を見る」に変更
+  const nextBtn = document.getElementById('btn-quiz-next');
+  if (quizSession.current + 1 >= quizSession.items.length) {
+    nextBtn.textContent = '結果を見る';
+  } else {
+    nextBtn.textContent = '次の問題へ';
+  }
+}
+
+document.getElementById('btn-quiz-left').addEventListener('click', () => submitQuizAnswer('left'));
+document.getElementById('btn-quiz-right').addEventListener('click', () => submitQuizAnswer('right'));
+
+document.getElementById('btn-quiz-next').addEventListener('click', () => {
+  quizSession.current++;
+  if (quizSession.current >= quizSession.items.length) {
+    showQuizFinalResult();
+  } else {
+    loadQuizQuestion();
+  }
+});
+
+function showQuizFinalResult() {
+  document.getElementById('quiz-play-area').classList.add('hidden');
+  document.getElementById('quiz-final-result').classList.remove('hidden');
+
+  const total = quizSession.items.length;
+  const score = quizSession.score;
+  document.getElementById('quiz-final-score').textContent = `${score} / ${total}`;
+
+  const details = quizSession.answers.map((a, i) =>
+    `<div class="final-item ${a.correct ? 'right' : 'wrong'}">
+      ${i + 1}. ${a.title} — ${a.correct ? '○ 正解' : '✕ 不正解'}
+      ${!a.correct && a.explanation ? `<br><small>真贋ポイント: ${a.explanation}</small>` : ''}
+    </div>`
+  ).join('');
+  document.getElementById('quiz-final-details').innerHTML = details;
+}
+
+document.getElementById('btn-quiz-retry').addEventListener('click', () => {
+  document.getElementById('quiz-final-result').classList.add('hidden');
+  initQuizPlay();
+});
+
 // === Init ===
 loadCatalog();
 loadCategories();

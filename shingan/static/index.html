@@ -16,6 +16,7 @@
     <button class="nav-btn" data-tab="batch">Batch</button>
     <button class="nav-btn" data-tab="references">References</button>
     <button class="nav-btn" data-tab="history">History</button>
+    <button class="nav-btn" data-tab="quiz">真贋クイズ</button>
   </nav>
 </header>
 
@@ -103,6 +104,94 @@
       <button id="btn-export-history">Export JSON</button>
     </div>
     <div id="history-list"></div>
+  </section>
+
+  <!-- ====== 真贋クイズ Tab ====== -->
+  <section id="tab-quiz" class="tab">
+    <!-- モード切替 -->
+    <div class="toolbar">
+      <button id="btn-quiz-create-mode" class="btn-primary">問題を作る</button>
+      <button id="btn-quiz-list-mode">問題一覧</button>
+      <button id="btn-quiz-play-mode">クイズに挑戦</button>
+    </div>
+
+    <!-- 作成モード -->
+    <div id="quiz-create" class="quiz-panel">
+      <h3>新しいクイズ問題を登録</h3>
+      <div class="quiz-form">
+        <div class="field">
+          <label>作品名</label>
+          <input id="quiz-title" type="text" placeholder="例: モナ・リザ">
+        </div>
+        <div class="quiz-upload-row">
+          <div class="quiz-upload-col">
+            <label>A欄（本物）</label>
+            <div class="quiz-dropzone" id="quiz-real-zone">
+              <span>クリックして画像を選択</span>
+              <input type="file" id="quiz-real-file" accept="image/*">
+            </div>
+            <div id="quiz-real-preview" class="quiz-preview hidden"></div>
+          </div>
+          <div class="quiz-upload-col">
+            <label>B欄（偽物）</label>
+            <div class="quiz-dropzone" id="quiz-fake-zone">
+              <span>クリックして画像を選択</span>
+              <input type="file" id="quiz-fake-file" accept="image/*">
+            </div>
+            <div id="quiz-fake-preview" class="quiz-preview hidden"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>真贋ポイント（解説）</label>
+          <textarea id="quiz-explanation" rows="3" placeholder="間違えた時に表示される解説を入力..."></textarea>
+        </div>
+        <button id="btn-quiz-submit" class="btn-primary">登録する</button>
+      </div>
+    </div>
+
+    <!-- 問題一覧モード -->
+    <div id="quiz-list" class="quiz-panel hidden">
+      <h3>登録済みクイズ一覧</h3>
+      <div id="quiz-list-items"></div>
+    </div>
+
+    <!-- 出題モード -->
+    <div id="quiz-play" class="quiz-panel hidden">
+      <div id="quiz-play-setup">
+        <h3>連続出題モード</h3>
+        <p id="quiz-play-count"></p>
+        <button id="btn-quiz-start" class="btn-primary">スタート</button>
+      </div>
+      <div id="quiz-play-area" class="hidden">
+        <div class="quiz-progress">
+          <span id="quiz-progress-text"></span>
+          <span id="quiz-score-text"></span>
+        </div>
+        <h3 id="quiz-play-title"></h3>
+        <p class="quiz-question-label">どちらが本物？</p>
+        <div class="quiz-play-images">
+          <div class="quiz-play-card" id="quiz-left-card">
+            <img id="quiz-left-img" src="" alt="左">
+            <button id="btn-quiz-left" class="btn-primary">左が本物</button>
+          </div>
+          <div class="quiz-play-card" id="quiz-right-card">
+            <img id="quiz-right-img" src="" alt="右">
+            <button id="btn-quiz-right" class="btn-primary">右が本物</button>
+          </div>
+        </div>
+        <div id="quiz-result-area" class="hidden">
+          <div id="quiz-result-banner"></div>
+          <div id="quiz-explanation-display" class="hidden"></div>
+          <button id="btn-quiz-next" class="btn-primary">次の問題へ</button>
+        </div>
+      </div>
+      <div id="quiz-final-result" class="hidden">
+        <h3>結果発表</h3>
+        <div id="quiz-final-score"></div>
+        <div id="quiz-final-details"></div>
+        <button id="btn-quiz-retry" class="btn-primary">もう一度</button>
+      </div>
+    </div>
   </section>
 </main>
 
